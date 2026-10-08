@@ -181,72 +181,99 @@ jobs:
           }
           EOF
 
-          cat > app/src/main/java/com/example/videowall/VideoWallpaperService.java <<'EOF'
+                   cat > app/src/main/java/com/example/videowall/MainActivity.java <<'EOF'
           package com.example.videowall;
 
-          import android.media.MediaPlayer;
+          import android.app.Activity;
+          import android.app.WallpaperManager;
+          import android.content.ComponentName;
+          import android.content.Intent;
           import android.net.Uri;
-          import android.service.wallpaper.WallpaperService;
-          import android.view.SurfaceHolder;
+          import android.os.Bundle;
+          import android.view.Gravity;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+          import android.widget.Toast;
 
-          public class VideoWallpaperService extends WallpaperService {
+          public class MainActivity extends Activity {
+              TextView status;
+
               @Override
-              public Engine onCreateEngine() {
-                  return new VideoEngine();
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  LinearLayout l = new LinearLayout(this);
+                  l.setOrientation(LinearLayout.VERTICAL);
+                  l.setGravity(Gravity.CENTER);
+                  l.setPadding(48, 48, 48, 48);
+                  status = new TextView(this);
+                  status.setGravity(Gravity.CENTER);
+                  status.setTextSize(16);
+                  Button home = new Button(this);
+                  home.setText("Choose HOME screen video");
+                  Button lock = new Button(this);
+                  lock.setText("Choose LOCK screen video");
+                  Button set = new Button(this);
+                  set.setText("Set as wallpaper");
+                  l.addView(status);
+                  l.addView(home);
+                  l.addView(lock);
+                  l.addView(set);
+                  setContentView(l);
+                  refresh();
+
+                  home.setOnClickListener(v -> pick(1));
+                  lock.setOnClickListener(v -> pick(2));
+
+                  set.setOnClickListener(v -> {
+                      if (getSharedPreferences("v", MODE_PRIVATE).getString("video", null) == null) {
+                          Toast.makeText(this, "Choose a home video first", Toast.LENGTH_SHORT).show();
+                          return;
+                      }
+                      try {
+                          Intent i = new Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER);
+                          i.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+                                  new ComponentName(this, VideoWallpaperService.class));
+                          startActivity(i);
+                      } catch (Exception e) {
+                          startActivity(new Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER));
+                      }
+                  });
               }
 
-              class VideoEngine extends Engine {
-                  MediaPlayer mp;
+              void pick(int code) {
+                  Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                  i.addCategory(Intent.CATEGORY_OPENABLE);
+                  i.setType("video/*");
+                  i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                          | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                  startActivityForResult(i, code);
+              }
 
-                  void start(SurfaceHolder h) {
-                      release();
-                      String s = getSharedPreferences("v", MODE_PRIVATE).getString("video", null);
-                      if (s == null || h == null || !h.getSurface().isValid()) return;
+              void refresh() {
+                  String h = getSharedPreferences("v", MODE_PRIVATE).getString("video", null);
+                  String k = getSharedPreferences("v", MODE_PRIVATE).getString("lock", null);
+                  status.setText("Home: " + (h == null ? "not chosen" : "selected")
+                          + "\nLock: " + (k == null ? "not chosen (uses home video)" : "selected"));
+              }
+
+              @Override
+              protected void onActivityResult(int req, int res, Intent data) {
+                  super.onActivityResult(req, res, data);
+                  if ((req == 1 || req == 2) && res == RESULT_OK && data != null && data.getData() != null) {
+                      Uri u = data.getData();
                       try {
-                          mp = new MediaPlayer();
-                          mp.setSurface(h.getSurface());
-                          mp.setDataSource(getApplicationContext(), Uri.parse(s));
-                          mp.setLooping(true);
-                          mp.setVolume(0f, 0f);
-                          mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
-                          mp.setOnPreparedListener(p -> p.start());
-                          mp.prepareAsync();
-                      } catch (Exception e) {
-                          release();
+                          getContentResolver().takePersistableUriPermission(
+                                  u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                      } catch (Exception ignored) {
                       }
-                  }
-
-                  void release() {
-                      if (mp != null) {
-                          try {
-                              mp.release();
-                          } catch (Exception ignored) {
-                          }
-                          mp = null;
-                      }
-                  }
-
-                  @Override
-                  public void onSurfaceCreated(SurfaceHolder h) {
-                      super.onSurfaceCreated(h);
-                      start(h);
-                  }
-
-                  @Override
-                  public void onVisibilityChanged(boolean visible) {
-                      if (visible) start(getSurfaceHolder());
-                      else release();
-                  }
-
-                  @Override
-                  public void onSurfaceDestroyed(SurfaceHolder h) {
-                      release();
-                      super.onSurfaceDestroyed(h);
+                      getSharedPreferences("v", MODE_PRIVATE).edit()
+                              .putString(req == 1 ? "video" : "lock", u.toString()).apply();
+                      refresh();
                   }
               }
           }
           EOF
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
